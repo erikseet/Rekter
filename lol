@@ -1,256 +1,86 @@
 #include "mbed.h"
 
-#define WAIT_TIME_US 500000
+DigitalOut led(LED1,1);
+DigitalOut led1(LED2,0);
 
-DigitalOut led[] = {PTC0, PTC1, PTC2, PTC3, PTC4, PTC5, PTC7, PTC8};
-int i = 0;
-float intensity = 1.0;
+DigitalOut leds[] = {p10, p11, p12, p13, p14, p15, p16, p17};
 
-bool kontra = false;
-DigitalIn but0(PTC9);
-DigitalIn but1(PTC10);
-DigitalIn but2(PTC11);
+DigitalIn button1(p5);
+DigitalIn button2(p6);
 
-int main()
-{
-    while (true)
-    {
-        if (but1 != 1 && but2 != 1) {
-            led[i] = intensity;
-            wait_us(WAIT_TIME_US);
+bool check = false;
+
+Ticker t1,t2,t3;
+
+void knightRider() {
+    static int index = -3; // The position of the first LED in the group of 3
+    static bool increasing = true; // Direction of movement: true for right, false for left
+
+    // Turn off the last LED based on direction
+    if (increasing) {
+        if (index > -3) {
+            leds[index - 1] = 0;
         }
-        else {
-            led[i] = 1.0;
+    } else {
+        if (index < 9) {
+            leds[index + 2] = 0;
         }
+    }
 
-        if (but0 != 1 && !kontra) {
-            kontra = true;
-            led[i] = 0;
-            i++;
+    // Turn on the current LED and update the index based on direction
+    leds[index] = 1;
 
-            if (i == 8) {
-                i = 0;
-            }
+    if (increasing) {
+        index = index + 1;
+    } else {
+        index = index - 1;
+    }
 
-            intensity = 1.0;
-            led[i] = intensity;
-        }
+    // Keep the next 2 LEDs in the group turned on
+    leds[index] = 1;
+    leds[index + 1] = 1;
 
-        if (but0 == 1 && kontra) {
-            kontra = false;
-        }
-
-        if (but1 == 0) {
-            intensity -= 0.1;
-            if (intensity < 0.0) {
-                intensity = 1.0;
-            }
-            led[i] = intensity;
-            wait_us(100000);
-        }
+    // Update the direction when reaching the ends of the array
+    if (index == 9 || index == -3) {
+        increasing = !increasing;
     }
 }
 
+void switcher() {
+    if (button1.read() && !check) {
+        led = !led;
+        led1 = !led1;
+        check = true;
+    }
+    if (!button1.read() && check) { 
+        check = false;
+    }
+}
 
-
-
-
-
-
-
-#include "mbed.h"
-
-#define WAIT_TIME_US 500000
-
-//DigitalOut led0( PTC0, 0 );
-
-DigitalOut led[] = {(PTC0),(PTC1),(PTC2),(PTC3),(PTC4),(PTC5),(PTC7),(PTC8)};
-int i = 0;
-
-bool kontra = false;
-DigitalIn but0( PTC9 );
-DigitalIn but1( PTC10 );
-DigitalIn but2( PTC11 );
-
-
-int main()
-{
-
-    while (true)
-    {
-
-
-
-        if (but1 != 1 && but2 != 1){
-            led[i] = !led[i];
-            wait_us( WAIT_TIME_US );
+void lower_interval() {
+    static float interval = 1.0f;
+    if (button2.read()) {
+        if (interval > 0.1f) {
+            interval -= 0.1f;
         } else {
-            led[i] = 1;
+            interval = 1.0f;
         }
-        if (but0 != 1 && kontra == false){
-            kontra = true;
-            led[i] = 0;
-            i++;
-            if (i == 8)
-                i = 0;
-            led[i] = 1;
-        }
-        if (but0 == 1 && kontra == true)
-            kontra = false;
-
-
-
-        //wait_us( WAIT_TIME_US );
+        t2.attach(callback(&knightRider), interval);
     }
 }
 
-
-
-
-
-
-
-#include "mbed.h"
-
-#define WAIT_TIME_US 500000
-
-DigitalOut led[] = {PTC0, PTC1, PTC2, PTC3, PTC4, PTC5, PTC7, PTC8};
-int i = 0;
-
-bool kontra = false;
-DigitalIn but0(PTC9);
-DigitalIn but1(PTC10);
-DigitalIn but2(PTC11);
-
-int main()
-{
-    while (true)
-    {
-        if (but1 != 1 && but2 != 1) {
-            led[i] = !led[i];
-            wait_us(WAIT_TIME_US);
-        }
-        else {
-            led[i] = 1;
-        }
-
-        if (but0 != 1 && !kontra) {
-            kontra = true;
-            led[i] = 0;
-            i++;
-
-            if (i == 8) {
-                i = 0;
-            }
-
-            led[i] = 1;
-        }
-
-        if (but0 == 1 && kontra) {
-            kontra = false;
-        }
-    }
+void buttons() {
+    switcher();
+    lower_interval();
 }
 
-
-
-
-#include "mbed.h"
-
-#define WAIT_TIME_US 500000
-
-// Define an array of PWM objects for the LEDs
-PwmOut led_pwm[] = {PTC0, PTC1, PTC2, PTC3, PTC4, PTC5, PTC7, PTC8};
-
-int i = 0;
-
-bool kontra = false;
-DigitalIn but0(PTC9);
-DigitalIn but1(PTC10);
-DigitalIn but2(PTC11);
-
 int main()
 {
-    while (true)
-    {
-        if (but1 != 1 && but2 != 1){
-            // Decrease the intensity of the current LED using PWM
-            for (float duty_cycle = 1.0f; duty_cycle >= 0.01f; duty_cycle -= 0.01f) {
-                led_pwm[i].write(duty_cycle);
-                wait_us(WAIT_TIME_US / 100);
-            }
-            // Set the intensity of the current LED back to full using PWM
-            led_pwm[i].write(1.0f);
-        } else {
-            // Turn on the current LED at full intensity using PWM
-            led_pwm[i].write(1.0f);
-        }
-
-        if (but0 != 1 && kontra == false){
-            kontra = true;
-            led_pwm[i].write(0.0f);
-            i++;
-            if (i == 8)
-                i = 0;
-            led_pwm[i].write(1.0f);
-        }
-
-        if (but0 == 1 && kontra == true)
-            kontra = false;
-
-        wait_us(WAIT_TIME_US);
-    }
-}
-
-#include "mbed.h"
-
-#define WAIT_TIME_US 500000
-
-PwmOut led[] = {PTC0, PTC1, PTC2, PTC3, PTC4, PTC5, PTC7, PTC8};
-int i = 0;
-float intensity = 1.0;
-
-bool kontra = false;
-DigitalIn but0(PTC9);
-DigitalIn but1(PTC10);
-DigitalIn but2(PTC11);
-
-int main()
-{
-    while (true)
-    {
-        if (but1 != 1 && but2 != 1) {
-            led[i].write(intensity);  // use PWM to set the LED brightness
-            wait_us(WAIT_TIME_US);
-        }
-        else {
-            led[i].write(1.0);  // set the LED to full brightness
-        }
-
-        if (but0 != 1 && !kontra) {
-            kontra = true;
-            led[i].write(0);  // turn off the current LED
-            i++;
-
-            if (i == 8) {
-                i = 0;
-            }
-
-            intensity = 1.0;
-            led[i].write(intensity);  // set the next LED to full brightness
-        }
-
-        if (but0 == 1 && kontra) {
-            kontra = false;
-        }
-
-        if (but1 == 0) {
-            intensity -= 0.1;
-            if (intensity < 0.0) {
-                intensity = 1.0;
-            }
-            led[i].write(intensity);  // use PWM to set the LED brightness
-            wait_us(100000);
-        }
+    t2.attach(callback(&knightRider), 1);
+    t3.attach(callback(&buttons), 0.05);
+    while (1) {
+        lower_interval();
+        printf("Blink! LED1 is now %d, LED2 is now %d\n", led.read(), led1.read());
+        wait_ms(500);
     }
 }
