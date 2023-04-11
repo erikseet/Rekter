@@ -166,3 +166,46 @@ int main( void )
 	i2c_stop();
 return 0;
 }
+#include <mbed.h>
+#include "i2c-lib.h"
+#include "si4735-lib.h"
+
+// Direction of I2C communication
+#define R	0b00000001
+#define W	0b00000000
+#define HWADR_PCF8574 0b01000000
+
+DigitalOut g_led_PTA1( PTA1, 0 );
+DigitalOut g_led_PTA2( PTA2, 0 );
+
+DigitalIn g_but_PTC9( PTC9 );
+DigitalIn g_but_PTC10( PTC10 );
+DigitalIn g_but_PTC11( PTC11 );
+DigitalIn g_but_PTC12( PTC12 );
+
+int main( void )
+{
+    uint8_t l_S1, l_S2, l_RSSI, l_SNR, l_MULT, l_CAP;
+    uint8_t l_ack = 0;
+    uint8_t l_led_num = 0;
+
+    printf( "K64F-KIT ready...\r\n" );
+
+    i2c_init();
+
+    i2c_start();
+    l_ack = i2c_output( HWADR_PCF8574 | W );
+    l_ack = i2c_output( 0 );
+
+    // Turn on each LED one by one
+    for (l_led_num = 0; l_led_num < 8; l_led_num++) {
+        uint8_t l_led_mask = (1 << l_led_num);
+        i2c_start();
+        l_ack = i2c_output( HWADR_PCF8574 | W );
+        l_ack = i2c_output( l_led_mask );
+        i2c_stop();
+        wait_ms(500);
+    }
+
+    return 0;
+}
