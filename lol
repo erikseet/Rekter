@@ -1,175 +1,122 @@
-#include "mbed.h"
+#include <mbed.h>
+#include "si4735-lib.h"
+#include "pcf8574-lib.h"
+#include "i2c-lib.h"
 
-DigitalOut led(LED1,1);
-DigitalOut led1(LED2,0);
+#define PCF8574_ADDRESS 0x40
+#define RADIO_ADDRESS SI4735_ADDRESS
 
-DigitalOut leds[] = {p10, p11, p12, p13, p14, p15, p16, p17};
+// Function declarations
+uint8_t set_freq(uint16_t freq);
+uint8_t set_volume(uint8_t volume);
+void search_freq(void);
+uint8_t get_tune_status(void);
+void display_freq(uint16_t freq);
 
-DigitalIn button1(p5);
-DigitalIn button2(p6);
-
-bool check = false;
-
-Ticker t1,t2,t3;
-
-void knightRider() {
-    static int index = -3; // The position of the first LED in the group of 3
-    static bool increasing = true; // Direction of movement: true for right, false for left
-
-    // Turn off the last LED based on direction
-    if (increasing) {
-        if (index > -3) {
-            leds[index - 1] = 0;
-        }
-    } else {
-        if (index < 9) {
-            leds[index + 2] = 0;
-        }
-    }
-
-    // Turn on the current LED and update the index based on direction
-    leds[index] = 1;
-
-    if (increasing) {
-        index = index + 1;
-    } else {
-        index = index - 1;
-    }
-
-    // Keep the next 2 LEDs in the group turned on
-    leds[index] = 1;
-    leds[index + 1] = 1;
-
-    // Update the direction when reaching the ends of the array
-    if (index == 9 || index == -3) {
-        increasing = !increasing;
-    }
-}
-
-void switcher() {
-    if (button1.read() && !check) {
-        led = !led;
-        led1 = !led1;
-        check = true;
-    }
-    if (!button1.read() && check) { 
-        check = false;
-    }
-}
-
-void lower_interval() {
-    static float interval = 1.0f;
-    if (button2.read()) {
-        if (interval > 0.1f) {
-            interval -= 0.1f;
-        } else {
-            interval = 1.0f;
-        }
-        t2.attach(callback(&knightRider), interval);
-    }
-}
-
-void buttons() {
-    switcher();
-    lower_interval();
-}
-
+// Main function
 int main()
 {
-    t2.attach(callback(&knightRider), 1);
-    t3.attach(callback(&buttons), 0.05);
-    while (1) {
-        lower_interval();
-        printf("Blink! LED1 is now %d, LED2 is now %d\n", led.read(), led1.read());
-        wait_ms(500);
+    // Initialize I2C bus
+    i2c_init();
+    
+    // Initialize Si4735 radio module
+    si4735_init();
+    
+    // Initialize PCF8574 expander for LCD display
+    pcf8574_init(PCF8574_ADDRESS);
+    
+    // Set initial frequency and volume
+    set_freq(1000);
+    set_volume(10);
+    
+    // Loop forever
+    while(1) {
+        // Display current frequency on LCD
+        uint16_t freq = get_tune_status();
+        display_freq(freq);
+        
+        // Wait for 1 second
+        wait_ms(1000);
     }
 }
 
-
-
-
-#include "mbed.h"
-
-DigitalOut led(LED1,1);
-DigitalOut led1(LED2,0);
-
-DigitalOut leds[] = {p10, p11, p12, p13, p14, p15, p16, p17};
-
-DigitalIn button1(p5);
-DigitalIn button2(p6);
-
-bool check = false;
-
-Ticker t1,t2,t3;
-
-void knightRider() {
-    static int index = -3; // The position of the first LED in the group of 3
-    static bool increasing = true; // Direction of movement: true for right, false for left
-
-    // Turn off the last LED based on direction
-    if (increasing) {
-        if (index > -3) {
-            leds[index - 1] = 0;
-        }
-    } else {
-        if (index < 9) {
-            leds[index + 2] = 0;
-        }
-    }
-
-    // Turn on the current LED and update the index based on direction
-    leds[index] = 1;
-
-    if (increasing) {
-        index = index + 1;
-    } else {
-        index = index - 1;
-    }
-
-    // Keep the next 2 LEDs in the group turned on
-    leds[index] = 1;
-    leds[index + 1] = 1;
-
-    // Update the direction when reaching the ends of the array
-    if (index == 9 || index == -3) {
-        increasing = !increasing;
-    }
-}
-
-void switcher() {
-    if (button1.read() && !check) {
-        led = !led;
-        led1 = !led1;
-        check = true;
-    }
-    if (!button1.read() && check) { 
-        check = false;
-    }
-}
-
-void lower_interval() {
-    static float interval = 1.0f;
-    if (button2.read()) {
-        if (interval > 0.1f) {
-            interval -= 0.1f;
-        } else {
-            interval = 1.0f;
-        }
-        t2.attach(callback(&knightRider), interval);
-    }
-}
-
-void buttons() {
-    switcher();
-    lower_interval();
-}
-
-int main()
+// Function definitions
+uint8_t set_freq(uint16_t freq)
 {
-    t3.attach(callback(&buttons), 0.05);
-    t2.attach(callback(&knightRider), 1);
+    uint8_t data_out[5] = {0x20, 0x00, (uint8_t)(freq >> 8), (uint8_t)(freq & 0xFF), 0};
+    return i2c(RADIO_ADDRESS, data_out, 5, nullptr, 0);
+}
+
+uint8_t set_volume(uint8_t volume)
+{
+    uint8_t data_out[4] = {0x12, 0x40, volume, 0x00};
+    return i2c(RADIO_ADDRESS, data_out, 4, nullptr, 0);
+}
+
+void search_freq(void)
+{
+    uint8_t data_out[6] = {0x20, 0x01, 0x00, 0x00, 0x00, 0x00};
+    i2c(RADIO_ADDRESS, data_out, 6, nullptr, 0);
+}
+
+uint8_t get_tune_status(void)
+{
+    uint8_t data_out[5] = {0x22, 0x00, 0x00, 0x00, 0x00};
+    uint8_t data_in[8];
+    uint8_t result = i2c(RADIO_ADDRESS, data_out, 5, data_in, 8);
+    if (result != 0) {
+        return 0;
+    }
+    uint16_t freq = ((uint16_t)data_in[2] << 8) | (uint16_t)data_in[3];
+    return freq;
+}
+
+void display_freq(uint16_t freq)
+{
+    char buffer[17];
+    snprintf(buffer, 17, "Freq: %d.%d MHz", freq / 1000, freq % 1000);
+    pcf8574_write_string(PCF8574_ADDRESS, buffer);
+}
+
+
+
+#include <mbed.h>
+#include "i2c-lib.h"
+
+#define PCF8574_ADDRESS 0x40
+
+class Expander {
+public:
+    Expander() {
+        // Initialize the I2C bus and PCF8574 expander
+        i2c_init();
+        i2c_start();
+        i2c_output(PCF8574_ADDRESS << 1);
+        i2c_output(0x00);
+        i2c_stop();
+    }
+
+    void voidbar(uint8_t t_level) {
+        if (t_level > 8) {
+            t_level = 8;
+        }
+
+        uint8_t level_mask = 0xFF << (8 - t_level);
+
+        i2c_start();
+        i2c_output(PCF8574_ADDRESS << 1);
+        i2c_output(~level_mask);
+        i2c_stop();
+    }
+};
+
+int main() {
+    Expander expander;
+
     while (1) {
-        printf("Blink! LED1 is now %d, LED2 is now %d\n", led.read(), led1.read());
-        wait_ms(500);
+        for (int i = 0; i < 9; i++) {
+            expander.voidbar(i);
+            wait(0.5);
+        }
     }
 }
