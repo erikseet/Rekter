@@ -375,3 +375,75 @@ int main(void) {
         }
         i2c_stop();
     }
+
+#include <mbed.h>
+#include "i2c-lib.h"
+#include "si4735-lib.h"
+
+// Direction of I2C communication
+#define R	0b00000001
+#define W	0b00000000
+#define HWADR_PCF8574 0b01000000
+
+DigitalOut g_led_PTA1(PTA1, 0);
+DigitalOut g_led_PTA2(PTA2, 0);
+
+DigitalIn button(PTC9);
+DigitalIn g_but_PTC10(PTC10);
+DigitalIn g_but_PTC11(PTC11);
+DigitalIn g_but_PTC12(PTC12);
+
+Ticker ticker;
+bool direction = true; // flag to keep track of the direction of movement
+bool check = false;    // flag to debounce button
+
+void led_movement() {
+    static int i = 0;
+    static int dir = 1;
+
+    i2c_start();
+
+    uint8_t l_ack = i2c_output(HWADR_PCF8574 | W);
+
+    if (button == 0 && !check) {
+        // If button PTC9 is pressed, change the direction of movement
+        direction = !direction;
+        if (direction) {
+            dir = 1;
+        } else {
+            dir = -1;
+        }
+        i += dir; // move to the next LED in the new direction
+        check = true;
+    } else if (button == 1) {
+        check = false;
+    }
+
+    if (i < 0) {
+        i = 1;
+        dir = 1;
+    } else if (i >= 8) {
+        i = 6;
+        dir = -1;
+    }
+
+    l_ack = i2c_output(1 << i);
+
+    // Stop communication
+    i2c_stop();
+}
+
+int main() {
+    printf("K64F-KIT ready...\r\n");
+
+    i2c_init();
+
+    ticker.attach(&led_movement, 0.05); // attach the ticker to the led_movement function with a period of 50 ms
+
+    while (true) {
+        // do nothing in the main loop
+    }
+
+    return 0;
+}
+
