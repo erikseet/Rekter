@@ -2,704 +2,99 @@
 #include "i2c-lib.h"
 #include "si4735-lib.h"
 
-// Direction of I2C communication
-#define R	0b00000001
-#define W	0b00000000
-#define HWADR_PCF8574 0b01000000
+#define SI4735_ADDRESS 0x22
+#define R    0b00000001
+#define W    0b00000000
 
-DigitalOut g_led_PTA1(PTA1, 0);
-DigitalOut g_led_PTA2(PTA2, 0);
+DigitalIn button1(PTC10);
+DigitalIn button2(PTC11);
+DigitalIn button3(PTC12);
 
-DigitalIn button(PTC9);
-DigitalIn g_but_PTC10(PTC10);
-DigitalIn g_but_PTC11(PTC11);
-DigitalIn g_but_PTC12(PTC12);
-Ticker t1;
-bool direction = true;
-bool check = false;
+int volume = 10;
+int signal_quality_limit = 2;
+bool button1_pressed = false;
+bool button2_pressed = false;
+bool button3_pressed = false;
 
-void but(){
-	if (button == 0 && !check) {
-	       direction = !direction;
-	       check = true;
-	   }
-	else if (button == 1 && check){
-	       check = false;
-	     }
+void changeVolume(int volume){
+    uint8_t ack = 0;
+    pc.printf( "\nVOLUME %d\r\n", volume);
+    I2C_Start();
+    ack |= I2C_Output(SI4735_ADDRESS | W);
+    ack |= I2C_Output(0x12);
+    ack |= I2C_Output(0x00);
+    ack |= I2C_Output(0x40);
+    ack |= I2C_Output(0x00);
+    ack |= I2C_Output(0x00);
+    ack |= I2C_Output(volume);
+    I2C_Stop();
 }
 
-int main(void) {
-    uint8_t l_S1, l_S2, l_RSSI, l_SNR, l_MULT, l_CAP;
-    uint8_t l_ack = 0;
-    printf("K64F-KIT ready...\r\n");
+void autoTuning(){
+    uint8_t ack = 0;
+    I2C_Start();
+    ack |= I2C_Output(SI4735_ADDRESS | W);
+    ack |= I2C_Output(0x21);
+    ack |= I2C_Output(0b00000000 | signal_quality_limit<<4);
+    I2C_Stop();
+}
 
-    i2c_init();
-    t1.attach(&but, 0.005);
+void onButton1Pressed(){
+    volume--;
+    if(volume < 0) volume = 0;
+    changeVolume(volume);
+}
 
+void onButton2Pressed(){
+    volume++;
+    if(volume > 63) volume = 63;
+    changeVolume(volume);
+}
 
-    while (true) {
-        i2c_start();
+void onButton3Pressed(){
+    autoTuning();
+}
 
-        l_ack = i2c_output(HWADR_PCF8574 | W);
-
-        if (direction) {
-            // zlava do prava
-            for (int i = 0; i < 8; i++) {
-                l_ack = i2c_output(1 << i);
-                wait_us(50000);
-            }
-        } else if (!direction) {
-            // zprava do lava
-            for (int i = 7; i >= 0; i--) {
-                l_ack = i2c_output(1 << i);
-                wait_us(50000);
-            }
+void onTick(){
+    if(button1.read() == 0){
+        if(!button1_pressed){
+            onButton1Pressed();
+            button1_pressed = true;
         }
-        i2c_stop();
+    }
+    else{
+        button1_pressed = false;
     }
 
-	if ( ( l_ack = si4735_init() ) != 0 )
-	{
-		printf( "Initialization of SI4735 finish with error (%d)\r\n", l_ack );
-		return 0;
-	}
-	else
-		printf( "SI4735 initialized.\r\n" );
+    if(button2.read() == 0){
+        if(!button2_pressed){
+            onButton2Pressed();
+            button2_pressed = true;
+        }
+    }
+    else{
+        button2_pressed = false;
+    }
 
-	printf( "\nTunig of radio station...\r\n" );
-
-	// Required frequency in MHz * 100
-	int l_freq = 10140; // Radiozurnal
-
-	// Tuning of radio station
-	i2c_start();
-	l_ack |= i2c_output( SI4735_ADDRESS | W);
-	l_ack |= i2c_output( 0x20 );			// FM_TUNE_FREQ
-	l_ack |= i2c_output( 0x00 );			// ARG1
-	l_ack |= i2c_output( l_freq >> 8 );		// ARG2 - FreqHi
-	l_ack |= i2c_output( l_freq & 0xff );	// ARG3 - FreqLo
-	l_ack |= i2c_output( 0x00 );			// ARG4
-	i2c_stop();
-	// Check l_ack!
-	// if...
-
-	// Tuning process inside SI4735
-	wait_us( 100000 );
-	printf( "... station tuned.\r\n\n" );
-
-	// Example of reading of tuned frequency
-	i2c_start();
-	l_ack |= i2c_output( SI4735_ADDRESS | W );
-	l_ack |= i2c_output( 0x22 );			// FM_TUNE_STATUS
-	l_ack |= i2c_output( 0x00 );			// ARG1
-	// repeated start
-	i2c_start();
-	// change direction of communication
-	l_ack |= i2c_output( SI4735_ADDRESS | R );
-	// read data
-	l_S1 = i2c_input();
-	i2c_ack();
-	l_S2 = i2c_input();
-	i2c_ack();
-	l_freq = ( uint32_t ) i2c_input() << 8;
-	i2c_ack();
-	l_freq |= i2c_input();
-	i2c_ack();
-	l_RSSI = i2c_input();
-	i2c_ack();
-	l_SNR = i2c_input();
-	i2c_ack();
-	l_MULT = i2c_input();
-	i2c_ack();
-	l_CAP = i2c_input();
-	i2c_nack();
-	i2c_stop();
-
-	if ( l_ack != 0 )
-		printf( "Communication error!\r\n" );
-	else
-		printf( "Current tuned frequency: %d.%dMHz\r\n", l_freq / 100, l_freq % 100 );
-
-	return 0;
+    if(button3.read() == 0){
+        if(!button3_pressed){
+            onButton3Pressed();
+            button3_pressed = true;
+        }
+    }
+    else{
+        button3_pressed = false;
+    }
 }
 
-#include <mbed.h>
-#include "si4735-lib.h"
-#include "pcf8574-lib.h"
-#include "i2c-lib.h"
-
-#define PCF8574_ADDRESS 0x40
-#define RADIO_ADDRESS SI4735_ADDRESS
-
-// Function declarations
-uint8_t set_freq(uint16_t freq);
-uint8_t set_volume(uint8_t volume);
-void search_freq(void);
-uint8_t get_tune_status(void);
-void display_freq(uint16_t freq);
-
-// Main function
-int main()
-{
-    // Initialize I2C bus
+int main(){
+    Ticker ticker;
     i2c_init();
-    
-    // Initialize Si4735 radio module
     si4735_init();
-    
-    // Initialize PCF8574 expander for LCD display
-    pcf8574_init(PCF8574_ADDRESS);
-    
-    // Set initial frequency and volume
-    set_freq(1000);
-    set_volume(10);
-    
-    // Loop forever
-    while(1) {
-        // Display current frequency on LCD
-        uint16_t freq = get_tune_status();
-        display_freq(freq);
-        
-        // Wait for 1 second
-        wait_ms(1000);
+
+    ticker.attach(&onTick, 0.1);
+
+    while(1){
+        // do something else
     }
 }
-
-// Function definitions
-uint8_t set_freq(uint16_t freq)
-{
-    uint8_t data_out[5] = {0x20, 0x00, (uint8_t)(freq >> 8), (uint8_t)(freq & 0xFF), 0};
-    return i2c(RADIO_ADDRESS, data_out, 5, nullptr, 0);
-}
-
-uint8_t set_volume(uint8_t volume)
-{
-    uint8_t data_out[4] = {0x12, 0x40, volume, 0x00};
-    return i2c(RADIO_ADDRESS, data_out, 4, nullptr, 0);
-}
-
-void search_freq(void)
-{
-    uint8_t data_out[6] = {0x20, 0x01, 0x00, 0x00, 0x00, 0x00};
-    i2c(RADIO_ADDRESS, data_out, 6, nullptr, 0);
-}
-
-uint8_t get_tune_status(void)
-{
-    uint8_t data_out[5] = {0x22, 0x00, 0x00, 0x00, 0x00};
-    uint8_t data_in[8];
-    uint8_t result = i2c(RADIO_ADDRESS, data_out, 5, data_in, 8);
-    if (result != 0) {
-        return 0;
-    }
-    uint16_t freq = ((uint16_t)data_in[2] << 8) | (uint16_t)data_in[3];
-    return freq;
-}
-
-void display_freq(uint16_t freq)
-{
-    char buffer[17];
-    snprintf(buffer, 17, "Freq: %d.%d MHz", freq / 1000, freq % 1000);
-    pcf8574_write_string(PCF8574_ADDRESS, buffer);
-}
-
-
-
-#include <mbed.h>
-#include "i2c-lib.h"
-
-#define PCF8574_ADDRESS 0x40
-
-class Expander {
-public:
-    Expander() {
-        // Initialize the I2C bus and PCF8574 expander
-        i2c_init();
-        i2c_start();
-        i2c_output(PCF8574_ADDRESS << 1);
-        i2c_output(0x00);
-        i2c_stop();
-    }
-
-    void voidbar(uint8_t t_level) {
-        if (t_level > 8) {
-            t_level = 8;
-        }
-
-        uint8_t level_mask = 0xFF << (8 - t_level);
-
-        i2c_start();
-        i2c_output(PCF8574_ADDRESS << 1);
-        i2c_output(~level_mask);
-        i2c_stop();
-    }
-};
-
-int main() {
-    Expander expander;
-
-    while (1) {
-        for (int i = 0; i < 9; i++) {
-            expander.voidbar(i);
-            wait(0.5);
-        }
-    }
-}
-
-
-
-
-#include <mbed.h>
-
-#include "i2c-lib.h"
-#include "si4735-lib.h"
-
-//************************************************************************
-
-// Direction of I2C communication
-#define R	0b00000001
-#define W	0b00000000
-#define HWADR_PCF8574 0b01000000
-
-#pragma GCC diagnostic ignored "-Wunused-but-set-variable"
-
-DigitalOut g_led_PTA1( PTA1, 0 );
-DigitalOut g_led_PTA2( PTA2, 0 );
-
-DigitalIn g_but_PTC9( PTC9 );
-DigitalIn g_but_PTC10( PTC10 );
-DigitalIn g_but_PTC11( PTC11 );
-DigitalIn g_but_PTC12( PTC12 );
-
-int main( void )
-{
-	uint8_t l_S1, l_S2, l_RSSI, l_SNR, l_MULT, l_CAP;
-	uint8_t l_ack = 0;
-
-	printf( "K64F-KIT ready...\r\n" );
-
-	i2c_init();
-
-	i2c_start();
-
-	l_ack = i2c_output( HWADR_PCF8574 | W );
-
-
-	l_ack = i2c_output( 0b0000010);
-
-	// stop communication
-	i2c_stop();
-return 0;
-}
-#include <mbed.h>
-#include "i2c-lib.h"
-#include "si4735-lib.h"
-
-// Direction of I2C communication
-#define R	0b00000001
-#define W	0b00000000
-#define HWADR_PCF8574 0b01000000
-
-DigitalOut g_led_PTA1( PTA1, 0 );
-DigitalOut g_led_PTA2( PTA2, 0 );
-
-DigitalIn g_but_PTC9( PTC9 );
-DigitalIn g_but_PTC10( PTC10 );
-DigitalIn g_but_PTC11( PTC11 );
-DigitalIn g_but_PTC12( PTC12 );
-
-int main( void )
-{
-    uint8_t l_S1, l_S2, l_RSSI, l_SNR, l_MULT, l_CAP;
-    uint8_t l_ack = 0;
-    uint8_t l_led_num = 0;
-
-    printf( "K64F-KIT ready...\r\n" );
-
-    i2c_init();
-
-    i2c_start();
-    l_ack = i2c_output( HWADR_PCF8574 | W );
-    l_ack = i2c_output( 0 );
-
-    // Turn on each LED one by one
-    for (l_led_num = 0; l_led_num < 8; l_led_num++) {
-        uint8_t l_led_mask = (1 << l_led_num);
-        i2c_start();
-        l_ack = i2c_output( HWADR_PCF8574 | W );
-        l_ack = i2c_output( l_led_mask );
-        i2c_stop();
-        wait_ms(500);
-    }
-
-    return 0;
-}
-
-#include <mbed.h>
-#include "i2c-lib.h"
-#include "si4735-lib.h"
-
-// Direction of I2C communication
-#define R	0b00000001
-#define W	0b00000000
-#define HWADR_PCF8574 0b01000000
-
-DigitalOut g_led_PTA1(PTA1, 0);
-DigitalOut g_led_PTA2(PTA2, 0);
-
-DigitalIn g_but_PTC9(PTC9);
-DigitalIn g_but_PTC10(PTC10);
-DigitalIn g_but_PTC11(PTC11);
-DigitalIn g_but_PTC12(PTC12);
-
-int main(void) {
-    uint8_t l_S1, l_S2, l_RSSI, l_SNR, l_MULT, l_CAP;
-    uint8_t l_ack = 0;
-    bool direction = true; // flag to keep track of the direction of movement
-
-    printf("K64F-KIT ready...\r\n");
-
-    i2c_init();
-
-    while (true) {
-        i2c_start();
-
-        l_ack = i2c_output(HWADR_PCF8574 | W);
-
-        if (direction) {
-            // Move LEDs from left to right
-            for (int i = 0; i < 8; i++) {
-                l_ack = i2c_output(1 << i);
-                wait(0.5); // wait for half a second
-            }
-        } else {
-            // Move LEDs from right to left
-            for (int i = 7; i >= 0; i--) {
-                l_ack = i2c_output(1 << i);
-                wait(0.5); // wait for half a second
-            }
-        }
-
-        // Toggle the direction flag to change the direction of movement
-        direction = !direction;
-
-        // Stop communication
-        i2c_stop();
-    }
-
-    return 0;
-}
-#include <mbed.h>
-#include "i2c-lib.h"
-#include "si4735-lib.h"
-
-// Direction of I2C communication
-#define R	0b00000001
-#define W	0b00000000
-#define HWADR_PCF8574 0b01000000
-
-DigitalOut g_led_PTA1(PTA1, 0);
-DigitalOut g_led_PTA2(PTA2, 0);
-
-DigitalIn g_but_PTC9(PTC9);
-DigitalIn g_but_PTC10(PTC10);
-DigitalIn g_but_PTC11(PTC11);
-DigitalIn g_but_PTC12(PTC12);
-
-int main(void) {
-    uint8_t l_S1, l_S2, l_RSSI, l_SNR, l_MULT, l_CAP;
-    uint8_t l_ack = 0;
-    bool direction = true; // flag to keep track of the direction of movement
-
-    printf("K64F-KIT ready...\r\n");
-
-    i2c_init();
-
-    while (true) {
-        i2c_start();
-
-        l_ack = i2c_output(HWADR_PCF8574 | W);
-
-        if (g_but_PTC9) {
-            // If button PTC9 is pressed, change the direction of movement
-            direction = !direction;
-        }
-
-        if (direction) {
-            // Move LEDs from left to right
-            for (int i = 0; i < 8; i++) {
-                l_ack = i2c_output(1 << i);
-                wait(0.5); // wait for half a second
-            }
-        } else {
-            // Move LEDs from right to left
-            for (int i = 7; i >= 0; i--) {
-                l_ack = i2c_output(1 << i);
-                wait(0.5); // wait for half a second
-            }
-        }
-
-        // Stop communication
-        i2c_stop();
-    }
-
-    return 0;
-}
-#include <mbed.h>
-#include "i2c-lib.h"
-#include "si4735-lib.h"
-
-// Direction of I2C communication
-#define R	0b00000001
-#define W	0b00000000
-#define HWADR_PCF8574 0b01000000
-
-DigitalOut g_led_PTA1(PTA1, 0);
-DigitalOut g_led_PTA2(PTA2, 0);
-
-DigitalIn button(PTC9);
-DigitalIn g_but_PTC10(PTC10);
-DigitalIn g_but_PTC11(PTC11);
-DigitalIn g_but_PTC12(PTC12);
-
-int main(void) {
-    uint8_t l_S1, l_S2, l_RSSI, l_SNR, l_MULT, l_CAP;
-    uint8_t l_ack = 0;
-    bool direction = true;
-    bool check = false;
-    printf("K64F-KIT ready...\r\n");
-
-    i2c_init();
-
-    while (true) {
-        i2c_start();
-
-        l_ack = i2c_output(HWADR_PCF8574 | W);
-
-
-        if (button == 0 && !check) {
-            direction = !direction;
-            check = true;
-        }
-        else if (button == 1 && check){
-            check = false;
-        }
-
-        if (direction) {
-            // zlava do prava
-            for (int i = 0; i < 8; i++) {
-                l_ack = i2c_output(1 << i);
-                wait_us(50000);
-            }
-        } else if (!direction) {
-            // zprava do lava
-            for (int i = 7; i >= 0; i--) {
-                l_ack = i2c_output(1 << i);
-                wait_us(50000);
-            }
-        }
-        i2c_stop();
-    }
-
-#include <mbed.h>
-#include "i2c-lib.h"
-#include "si4735-lib.h"
-
-// Direction of I2C communication
-#define R	0b00000001
-#define W	0b00000000
-#define HWADR_PCF8574 0b01000000
-
-DigitalOut g_led_PTA1(PTA1, 0);
-DigitalOut g_led_PTA2(PTA2, 0);
-
-DigitalIn button(PTC9);
-DigitalIn g_but_PTC10(PTC10);
-DigitalIn g_but_PTC11(PTC11);
-DigitalIn g_but_PTC12(PTC12);
-
-Ticker ticker;
-bool direction = true; // flag to keep track of the direction of movement
-bool check = false;    // flag to debounce button
-
-void led_movement() {
-    static int i = 0;
-    static int dir = 1;
-
-    i2c_start();
-
-    uint8_t l_ack = i2c_output(HWADR_PCF8574 | W);
-
-    if (button == 0 && !check) {
-        // If button PTC9 is pressed, change the direction of movement
-        direction = !direction;
-        if (direction) {
-            dir = 1;
-        } else {
-            dir = -1;
-        }
-        i += dir; // move to the next LED in the new direction
-        check = true;
-    } else if (button == 1) {
-        check = false;
-    }
-
-    if (i < 0) {
-        i = 1;
-        dir = 1;
-    } else if (i >= 8) {
-        i = 6;
-        dir = -1;
-    }
-
-    l_ack = i2c_output(1 << i);
-
-    // Stop communication
-    i2c_stop();
-}
-
-int main() {
-    printf("K64F-KIT ready...\r\n");
-
-    i2c_init();
-
-    ticker.attach(&led_movement, 0.05); // attach the ticker to the led_movement function with a period of 50 ms
-
-    while (true) {
-        // do nothing in the main loop
-    }
-
-    return 0;
-}
-
-
-
-
-
-
-
-#include <mbed.h>
-#include "i2c-lib.h"
-#include "si4735-lib.h"
-
-// Direction of I2C communication
-#define R	0b00000001
-#define W	0b00000000
-#define HWADR_PCF8574 0b01000000
-
-DigitalOut g_led_PTA1(PTA1, 0);
-DigitalOut g_led_PTA2(PTA2, 0);
-
-DigitalIn button(PTC9);
-DigitalIn g_but_PTC10(PTC10);
-DigitalIn g_but_PTC11(PTC11);
-DigitalIn g_but_PTC12(PTC12);
-Ticker t1;
-bool direction = true;
-bool check = false;
-
-void but(){
-	if (button == 0 && !check) {
-	       direction = !direction;
-	       check = true;
-	   }
-	else if (button == 1 && check){
-	       check = false;
-	     }
-}
-
-int main(void) {
-    uint8_t l_S1, l_S2, l_RSSI, l_SNR, l_MULT, l_CAP;
-    uint8_t l_ack = 0;
-    printf("K64F-KIT ready...\r\n");
-
-    i2c_init();
-    t1.attach(&but, 0.005);
-
-
-    while (true) {
-        i2c_start();
-
-        l_ack = i2c_output(HWADR_PCF8574 | W);
-
-        if (direction) {
-            // zlava do prava
-            for (int i = 0; i < 8; i++) {
-                l_ack = i2c_output(1 << i);
-                wait_us(50000);
-            }
-        } else if (!direction) {
-            // zprava do lava
-            for (int i = 7; i >= 0; i--) {
-                l_ack = i2c_output(1 << i);
-                wait_us(50000);
-            }
-        }
-        i2c_stop();
-    }
-
-	if ( ( l_ack = si4735_init() ) != 0 )
-	{
-		printf( "Initialization of SI4735 finish with error (%d)\r\n", l_ack );
-		return 0;
-	}
-	else
-		printf( "SI4735 initialized.\r\n" );
-
-	printf( "\nTunig of radio station...\r\n" );
-
-	// Required frequency in MHz * 100
-	int l_freq = 10140; // Radiozurnal
-
-	// Tuning of radio station
-	i2c_start();
-	l_ack |= i2c_output( SI4735_ADDRESS | W);
-	l_ack |= i2c_output( 0x20 );			// FM_TUNE_FREQ
-	l_ack |= i2c_output( 0x00 );			// ARG1
-	l_ack |= i2c_output( l_freq >> 8 );		// ARG2 - FreqHi
-	l_ack |= i2c_output( l_freq & 0xff );	// ARG3 - FreqLo
-	l_ack |= i2c_output( 0x00 );			// ARG4
-	i2c_stop();
-	// Check l_ack!
-	// if...
-
-	// Tuning process inside SI4735
-	wait_us( 100000 );
-	printf( "... station tuned.\r\n\n" );
-
-	// Example of reading of tuned frequency
-	i2c_start();
-	l_ack |= i2c_output( SI4735_ADDRESS | W );
-	l_ack |= i2c_output( 0x22 );			// FM_TUNE_STATUS
-	l_ack |= i2c_output( 0x00 );			// ARG1
-	// repeated start
-	i2c_start();
-	// change direction of communication
-	l_ack |= i2c_output( SI4735_ADDRESS | R );
-	// read data
-	l_S1 = i2c_input();
-	i2c_ack();
-	l_S2 = i2c_input();
-	i2c_ack();
-	l_freq = ( uint32_t ) i2c_input() << 8;
-	i2c_ack();
-	l_freq |= i2c_input();
-	i2c_ack();
-	l_RSSI = i2c_input();
-	i2c_ack();
-	l_SNR = i2c_input();
-	i2c_ack();
-	l_MULT = i2c_input();
-	i2c_ack();
-	l_CAP = i2c_input();
-	i2c_nack();
-	i2c_stop();
-
-	if ( l_ack != 0 )
-		printf( "Communication error!\r\n" );
-	else
-		printf( "Current tuned frequency: %d.%dMHz\r\n", l_freq / 100, l_freq % 100 );
-
-	return 0;
-}
-
