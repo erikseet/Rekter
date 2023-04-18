@@ -23,10 +23,10 @@ DigitalIn button2( PTC10 );
 DigitalIn button3( PTC11 );
 DigitalIn button4( PTC12 );
 
-bool  checkButton1 = 1;
-bool  checkButton2 = 1;
-bool  checkButton3 = 1;
-bool  checkButton4 = 1;
+bool  checkButton1 = true;
+bool  checkButton2 = true;
+bool  checkButton3 = true;
+bool  checkButton4 = true;
 int button4Timer = 0;
 
 int mode = 1;
