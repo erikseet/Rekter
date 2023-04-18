@@ -1,0 +1,359 @@
+
+#include <mbed.h>
+#include <iostream>
+#include "i2c-lib.h"
+#include "si4735-lib.h"
+
+#define R	0b00000001
+#define W	0b00000000
+
+#define HWADR_PCF8574 0x40
+#define A012 0
+
+uint8_t l_S1, l_S2, l_RSSI, l_SNR, l_MULT, l_CAP;
+uint8_t l_ack = 0;
+
+#pragma GCC diagnostic ignored "-Wunused-but-set-variable"
+
+DigitalOut g_led_PTA1( PTA1, 0 );
+DigitalOut g_led_PTA2( PTA2, 0 );
+
+DigitalIn button1( PTC9 );
+DigitalIn button2( PTC10 );
+DigitalIn button3( PTC11 );
+DigitalIn button4( PTC12 );
+
+bool  checkButton1 = 1;
+bool  checkButton2 = 1;
+bool  checkButton3 = 1;
+bool  checkButton4 = 1;
+int button4Timer = 0;
+
+int mode = 1;
+int freq = 10140;
+int volume = 30;
+int led = 0b00000001;
+
+int stations [8] = {10140};
+int index = 0;
+
+void modeChange() {
+    if (checkButton1 && button1 == 0) {
+        mode++;
+        if (mode == 5) {
+            mode = 1;
+        }
+        g_led_PTA1 = 0;
+        g_led_PTA2 = 0;
+        checkButton1 = false;
+    }
+
+    if (button1 == 1 && !checkButton1) { //tuto možno len else
+        checkButton1 = true;
+    }
+
+    if (mode == 2 || mode == 4) {
+        g_led_PTA1 = 1;
+    }
+
+    if (mode == 3 || mode == 4) {
+        g_led_PTA2 = 1;
+    }
+}
+void setVolume(int vol) {
+    i2c_start();
+    l_ack |= i2c_output( SI4735_ADDRESS | W );
+    l_ack |= i2c_output(0x12);
+    l_ack |= i2c_output(0x00);
+    l_ack |= i2c_output(0x40);
+    l_ack |= i2c_output(0x00);
+    l_ack |= i2c_output(0x00);
+    l_ack |= i2c_output(vol);
+    i2c_stop();
+}
+void volumeChanger() {
+    if (button2 == 0 && checkButton2) {
+        volume--;
+        if (volume == 0) {
+            volume = 63;
+        }
+        setVolume(volume);
+        printf("Volume changed, new volume = %d\n", volume);
+        checkButton2 = false;
+    } else if (button2 == 1 && !checkButton2) {
+        checkButton2 = true;
+    }
+
+    if (button3 == 0 && checkButton3) {
+        volume++;
+        if (volume == 63) {
+            volume = 1;
+        }
+        i2c_start();
+        setVolume(volume);
+        i2c_stop();
+
+        printf("Volume changed, new volume = %d\n", volume);
+        checkButton3 = false;
+
+    } else if (button3 == 1 && !checkButton3) {
+        checkButton3 = true;
+    }
+}
+void autoTuning(){
+		if (button4 == 0) {
+			while (button4 == 0) {
+				button4Timer += 1;
+			}
+			if (checkButton4 && button4Timer < 50000) {
+
+				i2c_start();
+				l_ack |= i2c_output (SI4735_ADDRESS | W );
+				l_ack |= i2c_output (0x21);
+				l_ack |= i2c_output (0b00001100);
+				i2c_stop();
+
+				i2c_start();
+				l_ack |= i2c_output( SI4735_ADDRESS | W );
+				l_ack |= i2c_output( 0x22 );			// FM_TUNE_STATUS
+				l_ack |= i2c_output( 0x00 );			// ARG1
+				// repeated start
+				i2c_start();
+				// change direction of communication
+				l_ack |= i2c_output( SI4735_ADDRESS | R );
+				// read data
+				l_S1 = i2c_input();
+				i2c_ack();
+				l_S2 = i2c_input();
+				i2c_ack();
+				freq = ( uint32_t ) i2c_input() << 8;
+				i2c_ack();
+				freq |= i2c_input();
+				i2c_ack();
+				l_RSSI = i2c_input();
+				i2c_ack();
+				l_SNR = i2c_input();
+				i2c_ack();
+				l_MULT = i2c_input();
+				i2c_ack();
+				l_CAP = i2c_input();
+				i2c_nack();
+				i2c_stop();
+
+				if ( l_ack != 0 )
+					printf( "Communication error!\r\n" );
+				else
+					printf( "Tuned frequency: %d.%dMHz\r\n", freq / 100, freq % 100 );
+
+				checkButton4 = false;
+			} else {
+				i2c_start();
+				l_ack |= i2c_output( SI4735_ADDRESS | W);
+				l_ack |= i2c_output( 0x20 );			// FM_TUNE_FREQ
+				l_ack |= i2c_output( 0x00 );			// ARG1
+				l_ack |= i2c_output( stations [index] >> 8 );		// ARG2 - FreqHi
+				l_ack |= i2c_output( stations [index] & 0xff );	// ARG3 - FreqLo
+				l_ack |= i2c_output( 0x00 );			// ARG4
+				i2c_stop();
+
+				printf ("Tuned station from slot %d\n", index);
+			}
+
+			button4Timer = 0;
+
+		} else if(button4 == 1 && !checkButton4) {
+			checkButton4 = true;
+		}
+}
+void normal () {
+    if (mode == 1) {
+        handleVolumeChange();
+        handleStationTuning();
+    }else{
+		return;
+	}
+}
+void setFrequency(int freq) {
+    i2c_start();
+    l_ack |= i2c_output(SI4735_ADDRESS | W);
+    l_ack |= i2c_output(0x20);		// FM_TUNE_FREQ
+    l_ack |= i2c_output(0x00);		// ARG1
+    l_ack |= i2c_output(freq >> 8);		// ARG2 - FreqHi
+    l_ack |= i2c_output(freq & 0xff);	// ARG3 - FreqLo
+    l_ack |= i2c_output(0x00);		// ARG4
+    i2c_stop();
+}
+void handleFreqChange() {
+    if (button2 == 0 && checkButton2) {
+        freq -= 10;
+
+        if (freq < 8750) {
+            freq = 10800;
+        }
+        setFrequency(freq);
+        printf("Frequency changed, Tuned frequency: %d.%dMHz\n", freq / 100, freq % 100);
+
+        checkButton2 = false;
+    } else if (button2 == 1 && !checkButton2) {
+        checkButton2 = true;
+    }
+
+    if (button3 == 0 && checkButton3) {
+        freq += 10;
+
+        if (freq > 10800) {
+            freq = 8750;
+        }
+        setFrequency(freq);
+        printf("Frequency changed, Tuned frequency: %d.%dMHz\n", freq / 100, freq % 100);
+
+        checkButton3 = false;
+    } else if (button3 == 1 && !checkButton3) {
+        checkButton3 = true;
+    }
+}
+void signalStrenght() {
+    i2c_start();
+    l_ack |= i2c_output(SI4735_ADDRESS | W);
+    l_ack |= i2c_output(0x22); // FM_TUNE_STATUS
+    l_ack |= i2c_output(0x00); // ARG1
+    // repeated start
+    i2c_start();
+    // change direction of communication
+    l_ack |= i2c_output(SI4735_ADDRESS | R);
+    // read data
+    l_S1 = i2c_input();
+    i2c_ack();
+    l_S2 = i2c_input();
+    i2c_ack();
+    freq = (uint32_t)i2c_input() << 8;
+    i2c_ack();
+    freq |= i2c_input();
+    i2c_ack();
+    l_RSSI = i2c_input();
+    i2c_ack();
+    l_SNR = i2c_input();
+    i2c_ack();
+    l_MULT = i2c_input();
+    i2c_ack();
+    l_CAP = i2c_input();
+    i2c_nack();
+    i2c_stop();
+
+    if (l_RSSI < 3) {
+        led = 0b00000011;
+    } else if (l_RSSI < 5) {
+        led = 0b00000111;
+    } else if (l_RSSI < 10) {
+        led = 0b00001111;
+    } else if (l_RSSI < 15) {
+        led = 0b00011111;
+    } else if (l_RSSI < 20) {
+        led = 0b01111111;
+    }
+
+    i2c_start();
+    l_ack |= i2c_output(HWADR_PCF8574 | A012 | W);
+    l_ack |= i2c_output(led);
+    i2c_stop();
+}
+
+void tuner() {
+    if (mode == 2) {
+		handleFreqChange();
+		signalStrenght();
+	}else{
+		return;
+	}
+}
+
+void save () {
+	if (mode != 3) {
+		return;
+	}
+	
+	if (button3 == 0 && checkButton3) {
+		index++;
+		if (index > 7) {
+			index = 0;
+		}
+		checkButton3 = false;
+	} else if (button3 == 1 && !checkButton3) {
+		checkButton3 = true;
+	}
+
+	if (button2 == 0 && checkButton2) {
+		stations [index] = freq;
+		printf ("Station saved to slot %d\n", index);
+		checkButton2 = false;
+
+	} else if (button2 == 1 && !checkButton2) {
+		checkButton2 = true;
+	}
+	/*		led = 0b00000001;
+		for (int i = 0; i < index; i++) {
+			led = led << 1;
+		}*/
+	led = 0b00000001 << index;
+	
+	i2c_start();
+	l_ack |= i2c_output(HWADR_PCF8574 | A012 | W);
+	l_ack |= i2c_output(led);
+	i2c_stop();
+}
+
+
+
+int main( void )
+{
+	printf( "K64F-KIT ready...\r\n" );
+
+	i2c_init();
+
+	if ( ( l_ack = si4735_init() ) != 0 )
+	{
+		printf( "Initialization of SI4735 finish with error (%d)\r\n", l_ack );
+		return 1;
+	}
+	else
+		printf( "SI4735 initialized.\r\n" );
+
+	printf( "\nTunig of radio station...\r\n" );
+
+	// Required frequency in MHz * 100
+
+	// Tuning of radio station
+	i2c_start();
+	l_ack |= i2c_output( SI4735_ADDRESS | W);
+	l_ack |= i2c_output( 0x20 );			// FM_TUNE_FREQ
+	l_ack |= i2c_output( 0x00 );			// ARG1
+	l_ack |= i2c_output( freq >> 8 );		// ARG2 - FreqHi
+	l_ack |= i2c_output( freq & 0xff );	// ARG3 - FreqLo
+	l_ack |= i2c_output( 0x00 );			// ARG4
+	i2c_stop();
+	// Check l_ack!
+	// if...
+
+	// Tuning process inside SI4735
+	wait_us( 100000 );
+	printf( "... station tuned.\r\n\n" );
+
+	if ( l_ack != 0 )
+		printf( "Communication error!\r\n" );
+	else
+		printf( "Tuned frequency: %d.%dMHz, volume: %d\n", freq / 100, freq % 100, volume );
+
+	Ticker t1,t2,t3,t4;
+	t1.attach_us(callback (&modeChange), 100);
+
+	t2.attach_us(callback (&normal), 10000);
+
+	t3.attach_us(callback (&tuner), 10000);
+
+	t4.attach_us(callback (&save), 10000);
+
+	while(1);
+
+	return 0;
+}
+
